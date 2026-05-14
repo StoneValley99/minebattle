@@ -59,7 +59,7 @@ LEVEL_NAMES = {
 # unlock_wave = antal avklarade vågor som krävs (totalt, inte per nivå)
 TOWER_TYPES = {
     "borrhammare": {
-        "name": "Borrhammare", "cost": 75,  "unlock_wave": 0,
+        "name": "Borrhammare", "cost": 100,  "unlock_wave": 0,
         "color": (200, 170, 50), "range": 110,
         "damage": 10, "fire_rate": 24,
         "bullet_color": (220, 200, 80), "bullet_speed": 7,
@@ -67,7 +67,7 @@ TOWER_TYPES = {
         "desc": "Snabb borrning, kort räckvidd",
     },
     "skrotare": {
-        "name": "Skrotare", "cost": 125, "unlock_wave": 0,
+        "name": "Skrotare", "cost": 175, "unlock_wave": 0,
         "color": (80, 130, 200), "range": 130,
         "damage": 16, "fire_rate": 45,
         "bullet_color": (120, 180, 255), "bullet_speed": 5,
@@ -75,7 +75,7 @@ TOWER_TYPES = {
         "desc": "Saktar ner något, medellång räckvidd",
     },
     "lhd": {
-        "name": "LHD", "cost": 200, "unlock_wave": 3,
+        "name": "LHD", "cost": 275, "unlock_wave": 3,
         "color": ORANGE, "range": 105,
         "damage": 42, "fire_rate": 70,
         "bullet_color": (255, 160, 40), "bullet_speed": 5,
@@ -83,7 +83,7 @@ TOWER_TYPES = {
         "desc": "Skopsprängning, träffar flera",
     },
     "sprang": {
-        "name": "Sprängare", "cost": 175, "unlock_wave": 3,
+        "name": "Sprängare", "cost": 250, "unlock_wave": 3,
         "color": (210, 40, 40), "range": 140,
         "damage": 72, "fire_rate": 120,
         "bullet_color": (255, 80, 40), "bullet_speed": 4,
@@ -91,7 +91,7 @@ TOWER_TYPES = {
         "desc": "Stor explosion, lång räckvidd",
     },
     "malmkross": {
-        "name": "Malmkross", "cost": 325, "unlock_wave": 5,
+        "name": "Malmkross", "cost": 425, "unlock_wave": 5,
         "color": (120, 100, 75), "range": 95,
         "damage": 60, "fire_rate": 55,
         "bullet_color": (180, 150, 100), "bullet_speed": 4,
@@ -99,7 +99,7 @@ TOWER_TYPES = {
         "desc": "Krossar + saktar lite, kort räckvidd",
     },
     "detonator": {
-        "name": "Detonator", "cost": 475, "unlock_wave": 7,
+        "name": "Detonator", "cost": 625, "unlock_wave": 7,
         "color": (200, 20, 20), "range": 165,
         "damage": 168, "fire_rate": 160,
         "bullet_color": (255, 80, 20), "bullet_speed": 3,
@@ -659,7 +659,8 @@ class Game:
 
     # ── Våghantering ─────────────────────────────────────────────────────────
     def _hp_scale(self):
-        return 1.0 + (self.level - 1) * 0.6 + self.wave * 0.04
+        # Våg 1→1.1x, Våg 5→1.5x, Våg 10→2.0x. Nivå 2 börjar på 1.8x.
+        return 1.0 + (self.level - 1) * 0.8 + self.wave * 0.10
 
     def _speed_scale(self):
         return 1.0 + (self.level - 1) * 0.08 + self.wave * 0.01
