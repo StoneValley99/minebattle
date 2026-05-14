@@ -111,14 +111,14 @@ TOWER_TYPES = {
 # ── Fiender ─────────────────────────────────────────────────────────────────
 # HP och speed skalas med game.hp_scale / game.speed_scale vid spawn
 ZOMBIE_STATS = {
-    "normal":   {"hp": 140,  "speed": 1.2,  "reward": 10,  "color": (80,  170, 80),  "size": 10},
-    "fast":     {"hp": 90,   "speed": 2.4,  "reward": 15,  "color": (200, 200, 50),  "size": 8},
-    "tank":     {"hp": 550,  "speed": 0.75, "reward": 30,  "color": (180, 80,  80),  "size": 14},
-    "boss":     {"hp": 1400, "speed": 0.55, "reward": 80,  "color": (200, 50,  200), "size": 20},
-    "megaboss": {"hp": 7000, "speed": 0.32, "reward": 500, "color": (130, 0,   160), "size": 30},
+    "normal":   {"hp": 70,   "speed": 1.2,  "reward": 10,  "color": (80,  170, 80),  "size": 10},
+    "fast":     {"hp": 45,   "speed": 2.4,  "reward": 15,  "color": (200, 200, 50),  "size": 8},
+    "tank":     {"hp": 275,  "speed": 0.75, "reward": 30,  "color": (180, 80,  80),  "size": 14},
+    "boss":     {"hp": 700,  "speed": 0.55, "reward": 80,  "color": (200, 50,  200), "size": 20},
+    "megaboss": {"hp": 3500, "speed": 0.32, "reward": 500, "color": (130, 0,   160), "size": 30},
     # Nivå 2 – nya fiender
-    "rusher":   {"hp": 40,   "speed": 4.2,  "reward": 18,  "color": (255, 220, 60),  "size": 7},
-    "bergtroll":{"hp": 900,  "speed": 0.55, "reward": 60,  "color": (130, 100, 65),  "size": 17},
+    "rusher":   {"hp": 20,   "speed": 4.2,  "reward": 18,  "color": (255, 220, 60),  "size": 7},
+    "bergtroll":{"hp": 450,  "speed": 0.55, "reward": 60,  "color": (130, 100, 65),  "size": 17},
 }
 
 def _w(count, interval, ztype):
