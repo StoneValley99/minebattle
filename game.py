@@ -606,7 +606,7 @@ class Game:
         self.level      = 1
         self._init_level()
         self.total_waves_done = 0   # för upplåsning av torn
-        self.money = 200
+        self.money = 300
         self.lives = 20
         self.score = 0
         self._reset_wave_state()
