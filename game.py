@@ -77,7 +77,7 @@ TOWER_TYPES = {
     "lhd": {
         "name": "LHD", "cost": 200, "unlock_wave": 3,
         "color": ORANGE, "range": 105,
-        "damage": 35, "fire_rate": 70,
+        "damage": 42, "fire_rate": 70,
         "bullet_color": (255, 160, 40), "bullet_speed": 5,
         "splash": 40, "slow": 0,
         "desc": "Skopsprängning, träffar flera",
@@ -85,7 +85,7 @@ TOWER_TYPES = {
     "sprang": {
         "name": "Sprängare", "cost": 175, "unlock_wave": 3,
         "color": (210, 40, 40), "range": 140,
-        "damage": 60, "fire_rate": 120,
+        "damage": 72, "fire_rate": 120,
         "bullet_color": (255, 80, 40), "bullet_speed": 4,
         "splash": 60, "slow": 0,
         "desc": "Stor explosion, lång räckvidd",
@@ -93,7 +93,7 @@ TOWER_TYPES = {
     "malmkross": {
         "name": "Malmkross", "cost": 325, "unlock_wave": 5,
         "color": (120, 100, 75), "range": 95,
-        "damage": 50, "fire_rate": 55,
+        "damage": 60, "fire_rate": 55,
         "bullet_color": (180, 150, 100), "bullet_speed": 4,
         "splash": 35, "slow": 25,
         "desc": "Krossar + saktar lite, kort räckvidd",
@@ -101,7 +101,7 @@ TOWER_TYPES = {
     "detonator": {
         "name": "Detonator", "cost": 475, "unlock_wave": 7,
         "color": (200, 20, 20), "range": 165,
-        "damage": 140, "fire_rate": 160,
+        "damage": 168, "fire_rate": 160,
         "bullet_color": (255, 80, 20), "bullet_speed": 3,
         "splash": 95, "slow": 0,
         "desc": "Massiv explosion, lång räckvidd",
