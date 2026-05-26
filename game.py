@@ -1,3 +1,4 @@
+import asyncio
 import pygame
 import math
 import random
@@ -891,7 +892,7 @@ class Game:
         btn_x0 = SCREEN_W - len(TOWER_TYPES) * btn_w - 4
         return pygame.Rect(btn_x0 + idx * btn_w, ROWS * GRID_SIZE + 4, btn_w, 58)
 
-    def run(self):
+    async def run(self):
         tower_keys = [pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5, pygame.K_6]
         tower_list = list(TOWER_TYPES.keys())
         running = True
@@ -990,10 +991,14 @@ class Game:
                 elif self.level_complete:
                     self.draw_level_complete()
 
+            await asyncio.sleep(0)
             pygame.display.flip()
 
         pygame.quit()
 
 
+async def main():
+    await Game().run()
+
 if __name__ == "__main__":
-    Game().run()
+    asyncio.run(main())
