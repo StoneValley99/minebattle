@@ -305,49 +305,76 @@ class Zombie:
 
     def _draw_standard(self, surface, cx, cy):
         s = self.size
+        # Färg: sjuklig grön (normal), gulblek (fast), mörkröd (tank), lila (boss)
+        body_col = self.color
+        # Skugga
         pygame.draw.circle(surface, (0, 0, 0), (cx + 2, cy + 2), s)
-        pygame.draw.circle(surface, self.color, (cx, cy), s)
-        helmet_col = (220, 180, 30) if self.ztype not in ("boss",) else (200, 30, 200)
-        pygame.draw.arc(surface, helmet_col,
-                        (cx - s, cy - s - 2, s * 2, s + 2), 0, math.pi, 3)
-        pygame.draw.circle(surface, YELLOW, (cx, cy - s + 1), 2)
+        # Kropp
+        pygame.draw.circle(surface, body_col, (cx, cy), s)
+        # Förruttnelsefläckar på kroppen
+        spot = tuple(max(0, v - 50) for v in body_col)
+        pygame.draw.circle(surface, spot, (cx - s//3, cy + s//4), max(2, s//4))
+        pygame.draw.circle(surface, spot, (cx + s//3, cy - s//5), max(1, s//5))
+        # Glödande röda ögon
         eye_off = max(2, s // 3)
-        for ex2, sign in [(cx - eye_off, 1), (cx + eye_off, 1)]:
-            pygame.draw.circle(surface, WHITE,   (ex2, cy - 2), 3)
-            pygame.draw.circle(surface, BLACK,   (ex2 + 1, cy - 2), 1)
+        for ex2 in [cx - eye_off, cx + eye_off]:
+            pygame.draw.circle(surface, (160, 0, 0),   (ex2, cy - s//4), 4)   # röd glöd
+            pygame.draw.circle(surface, (255, 60, 0),  (ex2, cy - s//4), 3)   # orange
+            pygame.draw.circle(surface, (255, 220, 0), (ex2, cy - s//4), 1)   # gul pupill
+        # Tandad mun
+        mouth_y = cy + s // 3
+        pygame.draw.line(surface, (20, 0, 0), (cx - s//2, mouth_y), (cx + s//2, mouth_y), 1)
+        for i in range(4):
+            tx = cx - s//2 + 2 + i * (s // 4)
+            pygame.draw.polygon(surface, (230, 220, 200),   # tand
+                                [(tx, mouth_y), (tx + 3, mouth_y), (tx + 1, mouth_y + 4)])
+        # Sår/stygn på boss
+        if self.ztype == "boss":
+            pygame.draw.line(surface, (180, 0, 0), (cx - 4, cy - s + 4), (cx + 4, cy - s + 4), 2)
+            for sx2 in range(cx - 3, cx + 4, 3):
+                pygame.draw.line(surface, (180, 0, 0), (sx2, cy - s + 2), (sx2, cy - s + 6), 1)
         self._draw_hp_bar(surface, cx, cy, s)
         if self.slow_timer > 0:
             pygame.draw.circle(surface, (100, 200, 255), (cx, cy), s + 3, 2)
 
     def _draw_rusher(self, surface, cx, cy):
         s = self.size
-        # Liten, gul, sylvass
+        # Liten, sjukt gul, snabb zombie – skeletttunn
         pygame.draw.circle(surface, (0, 0, 0), (cx + 1, cy + 1), s)
-        pygame.draw.circle(surface, self.color, (cx, cy), s)
-        # Spetsig "hjälm"
-        pygame.draw.polygon(surface, (255, 180, 0),
-                            [(cx, cy - s - 4), (cx - 3, cy - s + 1), (cx + 3, cy - s + 1)])
-        eye_off = 2
-        pygame.draw.circle(surface, RED, (cx - eye_off, cy - 1), 2)
-        pygame.draw.circle(surface, RED, (cx + eye_off, cy - 1), 2)
+        pygame.draw.circle(surface, (180, 180, 60), (cx, cy), s)   # gulblek
+        # Urgröpta kindben
+        pygame.draw.circle(surface, (120, 120, 20), (cx - 3, cy + 1), 2)
+        pygame.draw.circle(surface, (120, 120, 20), (cx + 3, cy + 1), 2)
+        # Galna stirrande ögon – vita med röd iris
+        for ex2 in [cx - 3, cx + 3]:
+            pygame.draw.circle(surface, WHITE,        (ex2, cy - 2), 3)
+            pygame.draw.circle(surface, (220, 30, 0), (ex2, cy - 2), 2)
+            pygame.draw.circle(surface, BLACK,        (ex2, cy - 2), 1)
+        # Skrikande mun
+        pygame.draw.ellipse(surface, (10, 0, 0), (cx - 3, cy + 2, 6, 4))
         self._draw_hp_bar(surface, cx, cy, s)
         if self.slow_timer > 0:
             pygame.draw.circle(surface, (100, 200, 255), (cx, cy), s + 2, 1)
 
     def _draw_bergtroll(self, surface, cx, cy):
         s = self.size
-        # Stor, stenbrun, klumpig
+        # Massiv, klumpig zombie – grå med röta
         pygame.draw.circle(surface, (0, 0, 0), (cx + 3, cy + 3), s)
-        pygame.draw.circle(surface, self.color, (cx, cy), s)
-        # Stenig textur – mörka fläckar
-        for dx2, dy2, r2 in [(-5, -3, 3), (4, -5, 2), (-3, 4, 2), (5, 3, 3)]:
-            pygame.draw.circle(surface, (100, 75, 45), (cx + dx2, cy + dy2), r2)
-        # Gröna ögon
+        pygame.draw.circle(surface, (110, 85, 55), (cx, cy), s)    # murken brun
+        # Klumpiga bölder/köttstycken
+        for dx2, dy2, r2 in [(-6, -4, 4), (5, -5, 3), (-4, 5, 3), (6, 4, 4)]:
+            pygame.draw.circle(surface, (85, 60, 35), (cx + dx2, cy + dy2), r2)
+        # Röda hålögon
         eye_off = s // 3
-        pygame.draw.circle(surface, (50, 220, 50), (cx - eye_off, cy - 3), 4)
-        pygame.draw.circle(surface, (50, 220, 50), (cx + eye_off, cy - 3), 4)
-        pygame.draw.circle(surface, BLACK, (cx - eye_off + 1, cy - 3), 2)
-        pygame.draw.circle(surface, BLACK, (cx + eye_off + 1, cy - 3), 2)
+        for ex2 in [cx - eye_off, cx + eye_off]:
+            pygame.draw.circle(surface, (40, 0, 0),   (ex2, cy - 3), 5)
+            pygame.draw.circle(surface, (200, 20, 0), (ex2, cy - 3), 3)
+            pygame.draw.circle(surface, (255, 80, 0), (ex2, cy - 3), 1)
+        # Söndersliten mun med huggtänder
+        pygame.draw.line(surface, (20, 0, 0), (cx - s//2 + 2, cy + s//3), (cx + s//2 - 2, cy + s//3), 2)
+        for tx in [cx - 5, cx, cx + 5]:
+            pygame.draw.polygon(surface, (210, 200, 180),
+                                [(tx - 2, cy + s//3), (tx + 2, cy + s//3), (tx, cy + s//3 + 5)])
         self._draw_hp_bar(surface, cx, cy, s)
         if self.slow_timer > 0:
             pygame.draw.circle(surface, (100, 200, 255), (cx, cy), s + 3, 2)
