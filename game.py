@@ -331,8 +331,11 @@ def make_mine_background(rng, path_cells, level=1, waypoints=None):
 
 
 def generate_procedural_waypoints(level, rng):
-    start_row = rng.randint(1, ROWS - 2)
-    end_row = rng.randint(1, ROWS - 2)
+    # Starta och sluta i mitten av kartan vertikalt
+    mid_lo = ROWS // 3
+    mid_hi = ROWS * 2 // 3
+    start_row = rng.randint(mid_lo, mid_hi)
+    end_row   = rng.randint(mid_lo, mid_hi)
     segment_count = 5 + min(3, level)
     waypoints = [(0, start_row)]
     last_col = 0
@@ -345,7 +348,8 @@ def generate_procedural_waypoints(level, rng):
             min_col = last_col + 2
             max_col = max(min_col, int((COLS - 1) * segment / (segment_count + 1)) + 2)
             target_col = rng.randint(min_col, min(COLS - 2, max_col))
-            target_row = rng.randint(max(1, last_row - 2), min(ROWS - 2, last_row + 2))
+            # Tillåt 4 raders rörelse för mer vindlande bana
+            target_row = rng.randint(max(1, last_row - 4), min(ROWS - 2, last_row + 4))
         if target_col <= last_col:
             target_col = min(COLS - 2, last_col + 2)
         if target_row != last_row:
@@ -2060,12 +2064,12 @@ class Game:
                         col, row = px_to_grid(mx, my)
                         if not self.grid_occupied(col, row):
                             px3, py3 = grid_to_px(col, row)
-                            tdata    = TOWER_TYPES[self.selected_tower_type]
-                            unlocked = self.tower_unlocked(self.selected_tower_type)
+                            tdata     = TOWER_TYPES[self.selected_tower_type]
+                            free_here = self.selected_tower_type in self.free_tower_queue
+                            unlocked  = self.tower_unlocked(self.selected_tower_type) or free_here
                             pygame.draw.circle(self.screen,
                                                (200,200,200) if unlocked else DARK_GRAY,
                                                (px3 + self.current_shake_x, py3 + self.current_shake_y), tdata["range"], 1)
-                            free_here = self.selected_tower_type in self.free_tower_queue
                             hint_col = tdata["color"] if (
                                 (self.money >= tdata["cost"] or free_here) and unlocked) else DARK_GRAY
                             pygame.draw.rect(self.screen, hint_col,
