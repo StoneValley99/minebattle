@@ -9,6 +9,7 @@ import os
 pygame.mixer.pre_init(44100, -16, 1, 512)
 pygame.init()
 MONEY_LOSS_FONT = pygame.font.SysFont("Arial", 18, bold=True)
+PART_FONT       = pygame.font.SysFont("Arial", 11, bold=True)
 
 def make_placement_sound():
     try:
@@ -196,6 +197,26 @@ LEVEL_WAVES = {
 }
 
 UNLOCK_MESSAGES = {3: "LHD och Sprängare upplåsta!", 5: "Malmkross upplåst!", 7: "Detonator upplåst!"}
+
+# ── Vapendelar ────────────────────────────────────────────────────────────────
+PART_TYPES = {
+    "kugge":    {"name": "Kugge",     "color": (200, 195,  55)},
+    "laddning": {"name": "Laddning",  "color": (255,  75,  25)},
+    "borrspets":{"name": "Borrspets", "color": ( 50, 185, 255)},
+}
+
+PART_RECIPES = [
+    {"id": "pengar",         "name": "Skrotinsamling",     "desc": "+300 kr direkt",
+     "parts": ["kugge", "kugge"],                           "effect": "money",      "amount": 300},
+    {"id": "boost",          "name": "Sprängladdat skift", "desc": "x2 skada 1 våg",
+     "parts": ["laddning", "laddning"],                     "effect": "damage_boost"},
+    {"id": "gratssprang",    "name": "Gratis Sprängare",   "desc": "Placera en Sprängare gratis",
+     "parts": ["laddning", "borrspets"],                    "effect": "free_tower",  "tower": "sprang"},
+    {"id": "gratslhd",       "name": "Gratis LHD",         "desc": "Placera en LHD gratis",
+     "parts": ["kugge", "borrspets"],                       "effect": "free_tower",  "tower": "lhd"},
+    {"id": "detonator_free", "name": "Gratis Detonator",   "desc": "Placera en Detonator gratis",
+     "parts": ["laddning", "laddning", "borrspets"],        "effect": "free_tower",  "tower": "detonator"},
+]
 
 # ── Hjälpfunktioner ─────────────────────────────────────────────────────────
 def grid_to_px(col, row):
@@ -585,7 +606,7 @@ class Tower:
         self.x, self.y   = grid_to_px(col, row)
         self.angle        = 0.0
 
-    def update(self, zombies, bullets, speed_mul=1.0):
+    def update(self, zombies, bullets, speed_mul=1.0, damage_mul=1.0):
         if self.cooldown > 0:
             self.cooldown -= speed_mul
             return
@@ -593,7 +614,7 @@ class Tower:
         if target:
             self.angle = math.atan2(target.y - self.y, target.x - self.x)
             bullets.append(Bullet(self.x, self.y, target,
-                                  self.bullet_speed, self.damage,
+                                  self.bullet_speed, int(self.damage * damage_mul),
                                   self.bullet_color, self.splash, self.slow))
             self.cooldown = self.fire_rate
 
@@ -909,6 +930,55 @@ class UnlockBanner:
         self.timer -= 1
 
 
+# ── Vapendel på kartan ────────────────────────────────────────────────────────
+class WeaponPart:
+    """En vapendel som blinkar på kartan under spelet."""
+    RADIUS = 11
+
+    def __init__(self, col, row, ptype):
+        self.col      = col
+        self.row      = row
+        self.ptype    = ptype
+        self.x        = col * GRID_SIZE + GRID_SIZE // 2
+        self.y        = row * GRID_SIZE + GRID_SIZE // 2
+        self.timer    = 0
+        self.lifetime = 720    # ~12 s vid 60 fps
+
+    def update(self):
+        self.timer    += 1
+        self.lifetime -= 1
+
+    @property
+    def alive(self):
+        return self.lifetime > 0
+
+    @property
+    def visible(self):
+        period = 8 if self.lifetime < 120 else 22
+        return (self.timer // period) % 2 == 0
+
+    def draw(self, surface, shake=(0, 0)):
+        if not self.visible:
+            return
+        data  = PART_TYPES[self.ptype]
+        color = data["color"]
+        px    = self.x + shake[0]
+        py    = self.y + shake[1]
+        pulse = abs(math.sin(self.timer * 0.07))
+        glow_r = int(16 + pulse * 8)
+        glow_surf = pygame.Surface((glow_r * 2 + 4, glow_r * 2 + 4), pygame.SRCALPHA)
+        pygame.draw.circle(glow_surf, (*color, int(60 + pulse * 80)),
+                           (glow_r + 2, glow_r + 2), glow_r)
+        surface.blit(glow_surf, (px - glow_r - 2, py - glow_r - 2))
+        pygame.draw.circle(surface, color, (px, py), self.RADIUS)
+        pygame.draw.circle(surface, WHITE, (px, py), self.RADIUS, 2)
+        lbl = PART_FONT.render(data["name"][0], True, (20, 20, 20))
+        surface.blit(lbl, (px - lbl.get_width() // 2, py - lbl.get_height() // 2))
+
+    def hit(self, mx, my):
+        return (mx - self.x) ** 2 + (my - self.y) ** 2 <= (self.RADIUS + 10) ** 2
+
+
 # ── Spelet ────────────────────────────────────────────────────────────────────
 class Game:
     def __init__(self):
@@ -1140,11 +1210,18 @@ class Game:
         # wave progress bar
         self.wave_bar_total = 0
         self.wave_bar_remaining = 0
+        # vapendelar
+        self.parts_on_map      = []
+        self.collected_parts   = []
+        self.assembled_items   = []
+        self.free_tower_queue  = []
+        self.damage_boost_waves = 0
+        self.show_assembly     = False
 
     def full_reset(self):
         self.level            = 1
         self.total_waves_done = 0
-        self.money = 200
+        self.money = 300
         self.lives = 20
         self.score = 0
         self._init_level()
@@ -1198,18 +1275,36 @@ class Game:
         except Exception:
             pass
 
+    def _spawn_wave_parts(self):
+        """Spawna 1-3 vapendelar på slumpmässiga lediga celler."""
+        n = random.randint(1, 3)
+        free = [
+            (c, r) for c in range(COLS) for r in range(ROWS)
+            if (c, r) not in self.path_cells
+            and not any(t.col == c and t.row == r for t in self.towers)
+            and not any(p.col == c and p.row == r for p in self.parts_on_map)
+        ]
+        random.shuffle(free)
+        ptypes = list(PART_TYPES.keys())
+        for c, r in free[:n]:
+            self.parts_on_map.append(WeaponPart(c, r, random.choice(ptypes)))
+
     def _start_wave_immediate(self):
         waves = LEVEL_WAVES[self.level]
         if self.wave >= len(waves):
             return
         self.wave_active   = True
         self.between_waves = False
+        self.show_assembly = False
         self.spawn_queue   = []
         for group in waves[self.wave]:
             for _ in range(group["count"]):
                 self.spawn_queue.append((group["type"], group["interval"]))
         self.spawn_timer = 0
         self.wave += 1
+        # Spawna nya vapendelar för den här vågen
+        self.parts_on_map = []
+        self._spawn_wave_parts()
         # start cyber track now that the wave is active
         self.stop_cyber_music()
         if getattr(self, 'cyber_sound', None):
@@ -1233,6 +1328,9 @@ class Game:
                 # Upplåsningsbanners
                 if self.total_waves_done in UNLOCK_MESSAGES:
                     self.banners.append(UnlockBanner(UNLOCK_MESSAGES[self.total_waves_done]))
+                # Vapendel-skadaboost minskar en våg
+                if self.damage_boost_waves > 0:
+                    self.damage_boost_waves -= 1
                 # Nivå klar?
                 if self.wave >= len(LEVEL_WAVES[self.level]):
                     self.level_complete = True
@@ -1256,15 +1354,23 @@ class Game:
         tdata = TOWER_TYPES[self.selected_tower_type]
         if not self.tower_unlocked(self.selected_tower_type):
             return
-        if self.money < tdata["cost"] or self.grid_occupied(col, row):
+        if self.grid_occupied(col, row):
+            return
+        # Gratis placering om vi har ett gratistorn av rätt typ i kön
+        free_placement = (self.selected_tower_type in self.free_tower_queue)
+        cost = 0 if free_placement else tdata["cost"]
+        if self.money < cost:
             return
         tower = Tower(col, row, self.selected_tower_type)
         self.towers.append(tower)
-        self.money -= tdata["cost"]
+        self.money -= cost
+        if free_placement:
+            self.free_tower_queue.remove(self.selected_tower_type)
         # Add smash effect when tower is placed
         self.effects.append(SmashEffect(tower.x, tower.y, self.selected_tower_type))
         mx, my = pygame.mouse.get_pos()
-        self.effects.append(MoneyLossEffect(mx, my - 28, tdata["cost"]))
+        if cost > 0:
+            self.effects.append(MoneyLossEffect(mx, my - 28, cost))
         if self.placement_sound:
             self.placement_sound.play()
         elif self.weapon_click_sound:
@@ -1284,14 +1390,19 @@ class Game:
             self.current_shake_x = 0
             self.current_shake_y = 0
         self.handle_spawn()
+        # Uppdatera vapendelar
+        for p in self.parts_on_map:
+            p.update()
+        self.parts_on_map = [p for p in self.parts_on_map if p.alive]
         for z in self.zombies:
             z.update(self.speed_multiplier)
         for z in self.zombies:
             if z.reached_end:
                 self.lives -= 1
         self.zombies = [z for z in self.zombies if z.alive and not z.reached_end]
+        dmul = 2.0 if self.damage_boost_waves > 0 else 1.0
         for t in self.towers:
-            t.update(self.zombies, self.bullets, self.speed_multiplier)
+            t.update(self.zombies, self.bullets, self.speed_multiplier, dmul)
         for b in self.bullets:
             b.update(self.zombies, self.speed_multiplier)
             if b.splash > 0 and not b.alive:
@@ -1362,6 +1473,133 @@ class Game:
                     self.wave_countdown_timer = 0.0
                     self.wave_countdown_number = 0
                     self._start_wave_immediate()
+
+    # ── Vapendelar – hjälpmetoder ──────────────────────────────────────────────
+    def _assembly_btn_rect(self):
+        ui_y = ROWS * GRID_SIZE
+        return pygame.Rect(SCREEN_W // 2 - 200, ui_y + 14, 88, 32)
+
+    def _can_craft(self, recipe):
+        inv = list(self.collected_parts)
+        for part in recipe["parts"]:
+            if part in inv:
+                inv.remove(part)
+            else:
+                return False
+        return True
+
+    def _craft_recipe(self, recipe):
+        inv = list(self.collected_parts)
+        for part in recipe["parts"]:
+            inv.remove(part)
+        self.collected_parts = inv
+        effect = recipe["effect"]
+        if effect == "money":
+            self.money += recipe["amount"]
+            self.score += recipe["amount"]
+        elif effect == "damage_boost":
+            self.damage_boost_waves += 1
+        elif effect == "free_tower":
+            self.free_tower_queue.append(recipe["tower"])
+
+    def _handle_assembly_click(self, mx, my):
+        popup_x = 18
+        popup_y = max(10, ROWS * GRID_SIZE - 330)
+        popup_w = 380
+        close_rect = pygame.Rect(popup_x + popup_w - 32, popup_y + 6, 26, 26)
+        if close_rect.collidepoint(mx, my):
+            self.show_assembly = False
+            return True
+        recipe_y = popup_y + 94
+        for recipe in PART_RECIPES:
+            btn = pygame.Rect(popup_x + 8, recipe_y, popup_w - 16, 52)
+            if btn.collidepoint(mx, my) and self._can_craft(recipe):
+                self._craft_recipe(recipe)
+                return True
+            recipe_y += 58
+        return False
+
+    def draw_parts_on_map(self):
+        for p in self.parts_on_map:
+            p.draw(self.screen, shake=(self.current_shake_x, self.current_shake_y))
+
+    def draw_assembly_ui(self):
+        if not self.show_assembly:
+            return
+        popup_x = 18
+        popup_y = max(10, ROWS * GRID_SIZE - 330)
+        popup_w = 380
+        popup_h = 100 + len(PART_RECIPES) * 58 + 12
+
+        # Background panel
+        surf = pygame.Surface((popup_w, popup_h), pygame.SRCALPHA)
+        surf.fill((16, 14, 12, 235))
+        pygame.draw.rect(surf, (175, 150, 90), (0, 0, popup_w, popup_h), 2, border_radius=12)
+        self.screen.blit(surf, (popup_x, popup_y))
+
+        # Title
+        title = self.font_big.render("SMIDESBORD", True, WARN_YELLOW)
+        self.screen.blit(title, (popup_x + 12, popup_y + 10))
+
+        # Close button
+        close_rect = pygame.Rect(popup_x + popup_w - 32, popup_y + 6, 26, 26)
+        pygame.draw.rect(self.screen, (180, 45, 45), close_rect, border_radius=6)
+        cx_t = self.font_med.render("X", True, WHITE)
+        self.screen.blit(cx_t, (close_rect.x + 6, close_rect.y + 3))
+
+        # Inventory row
+        inv_lbl = self.font_small.render("Dina delar:", True, (200, 200, 180))
+        self.screen.blit(inv_lbl, (popup_x + 12, popup_y + 46))
+        for i, ptype in enumerate(self.collected_parts[:8]):
+            color = PART_TYPES[ptype]["color"]
+            cx2 = popup_x + 110 + i * 28
+            cy2 = popup_y + 54
+            pygame.draw.circle(self.screen, color, (cx2, cy2), 11)
+            pygame.draw.circle(self.screen, WHITE, (cx2, cy2), 11, 1)
+            lbl = PART_FONT.render(PART_TYPES[ptype]["name"][0], True, (20, 20, 20))
+            self.screen.blit(lbl, (cx2 - lbl.get_width() // 2, cy2 - lbl.get_height() // 2))
+        if not self.collected_parts:
+            no_lbl = self.font_small.render("(inga delar samlade ännu)", True, GRAY)
+            self.screen.blit(no_lbl, (popup_x + 110, popup_y + 46))
+
+        # Separator
+        pygame.draw.line(self.screen, (100, 88, 65),
+                         (popup_x + 8, popup_y + 72), (popup_x + popup_w - 8, popup_y + 72), 1)
+        recipe_lbl = self.font_small.render("Recept:", True, (200, 200, 180))
+        self.screen.blit(recipe_lbl, (popup_x + 12, popup_y + 76))
+
+        # Recipe buttons
+        recipe_y = popup_y + 94
+        for recipe in PART_RECIPES:
+            can_craft = self._can_craft(recipe)
+            btn_rect = pygame.Rect(popup_x + 8, recipe_y, popup_w - 16, 52)
+            bg_col = (30, 55, 30) if can_craft else (26, 22, 20)
+            border_col = (80, 200, 80) if can_craft else (75, 65, 55)
+            pygame.draw.rect(self.screen, bg_col, btn_rect, border_radius=8)
+            pygame.draw.rect(self.screen, border_col, btn_rect, 1, border_radius=8)
+
+            # Part icons for recipe
+            px2 = btn_rect.x + 10
+            for j, ptype in enumerate(recipe["parts"]):
+                color = PART_TYPES[ptype]["color"]
+                ccx = px2 + 11 + j * 26
+                ccy = btn_rect.y + btn_rect.h // 2
+                pygame.draw.circle(self.screen, color, (ccx, ccy), 10)
+                pygame.draw.circle(self.screen, WHITE, (ccx, ccy), 10, 1)
+                part_lbl = PART_FONT.render(PART_TYPES[ptype]["name"][0], True, (20, 20, 20))
+                self.screen.blit(part_lbl, (ccx - part_lbl.get_width() // 2, ccy - part_lbl.get_height() // 2))
+
+            # Arrow and text
+            ax = px2 + len(recipe["parts"]) * 26 + 16
+            arr = self.font_small.render("->", True, (180, 180, 180))
+            self.screen.blit(arr, (ax, btn_rect.y + 8))
+            name_col = WHITE if can_craft else GRAY
+            name_txt = self.font_med.render(recipe["name"], True, name_col)
+            self.screen.blit(name_txt, (ax + 22, btn_rect.y + 6))
+            desc_col = (190, 190, 160) if can_craft else DARK_GRAY
+            desc_txt = self.font_small.render(recipe["desc"], True, desc_col)
+            self.screen.blit(desc_txt, (ax + 22, btn_rect.y + 28))
+            recipe_y += 58
 
     # ── Ritning ───────────────────────────────────────────────────────────────
     def draw_map(self):
@@ -1453,6 +1691,45 @@ class Game:
             sub = self.font_med.render(subtitle, True, (230, 230, 230))
             self.screen.blit(txt, (wave_cx - txt.get_width() // 2, wave_cy - txt.get_height() // 2 - 8))
             self.screen.blit(sub, (wave_cx - sub.get_width() // 2, wave_cy + txt.get_height() // 2 - 2))
+            # Smidesbord-knapp
+            abtn = self._assembly_btn_rect()
+            abtn_col = (50, 140, 50) if self.show_assembly else (40, 55, 40)
+            abtn_border = (120, 220, 120) if self.show_assembly else (90, 110, 80)
+            pygame.draw.rect(self.screen, abtn_col, abtn, border_radius=8)
+            pygame.draw.rect(self.screen, abtn_border, abtn, 1, border_radius=8)
+            part_count = len(self.collected_parts)
+            atxt = self.font_small.render(f"SMIDE ({part_count})", True, WHITE)
+            self.screen.blit(atxt, (abtn.x + abtn.w // 2 - atxt.get_width() // 2,
+                                    abtn.y + abtn.h // 2 - atxt.get_height() // 2))
+
+        # Gratis-torn indikator
+        if self.free_tower_queue:
+            ft = self.free_tower_queue[0]
+            ft_col = TOWER_TYPES[ft]["color"]
+            ft_txt = self.font_small.render(f"GRATIS: {TOWER_TYPES[ft]['name']} – välj och placera!", True, ft_col)
+            bw = ft_txt.get_width() + 16
+            bh = ft_txt.get_height() + 8
+            bx = SCREEN_W // 2 - bw // 2
+            by = ui_y - bh - 4
+            bg = pygame.Surface((bw, bh), pygame.SRCALPHA)
+            bg.fill((20, 20, 20, 200))
+            pygame.draw.rect(bg, ft_col, (0, 0, bw, bh), 1, border_radius=6)
+            self.screen.blit(bg, (bx, by))
+            self.screen.blit(ft_txt, (bx + 8, by + 4))
+
+        # Skadaboost-indikator
+        if self.damage_boost_waves > 0:
+            boost_txt = self.font_med.render(
+                f"SKADABOOST x2  ({self.damage_boost_waves} vag kvar)", True, WARN_YELLOW)
+            bw2 = boost_txt.get_width() + 16
+            bh2 = boost_txt.get_height() + 8
+            bx2 = SCREEN_W // 2 - bw2 // 2
+            by2 = ui_y - bh2 - (36 if self.free_tower_queue else 4)
+            bg2 = pygame.Surface((bw2, bh2), pygame.SRCALPHA)
+            bg2.fill((50, 40, 10, 210))
+            pygame.draw.rect(bg2, WARN_YELLOW, (0, 0, bw2, bh2), 1, border_radius=6)
+            self.screen.blit(bg2, (bx2, by2))
+            self.screen.blit(boost_txt, (bx2 + 8, by2 + 4))
 
         # left status section
         stats = [
@@ -1721,6 +1998,25 @@ class Game:
                                     self.weapon_click_sound.play()
                             handled = True
                             break
+                    # Kolla klick på assembly-popup
+                    if not handled and self.show_assembly:
+                        if self._handle_assembly_click(mx, my):
+                            handled = True
+                    # Kolla klick på smidesbord-knapp
+                    if not handled and self.between_waves and not self.level_complete:
+                        abtn = self._assembly_btn_rect()
+                        if abtn.collidepoint(mx, my):
+                            self.show_assembly = not self.show_assembly
+                            handled = True
+                    # Kolla klick på vapendel på kartan
+                    if not handled and my < ROWS * GRID_SIZE and not self.game_over:
+                        for p in list(self.parts_on_map):
+                            if p.hit(mx, my):
+                                if len(self.collected_parts) < 9:
+                                    self.collected_parts.append(p.ptype)
+                                    self.parts_on_map.remove(p)
+                                handled = True
+                                break
                     if not handled:
                         ui_y = ROWS * GRID_SIZE
                         cx_btn = SCREEN_W // 2
@@ -1766,7 +2062,9 @@ class Game:
                             pygame.draw.circle(self.screen,
                                                (200,200,200) if unlocked else DARK_GRAY,
                                                (px3 + self.current_shake_x, py3 + self.current_shake_y), tdata["range"], 1)
-                            hint_col = tdata["color"] if (self.money >= tdata["cost"] and unlocked) else DARK_GRAY
+                            free_here = self.selected_tower_type in self.free_tower_queue
+                            hint_col = tdata["color"] if (
+                                (self.money >= tdata["cost"] or free_here) and unlocked) else DARK_GRAY
                             pygame.draw.rect(self.screen, hint_col,
                                              (col*GRID_SIZE+3 + self.current_shake_x, row*GRID_SIZE+3 + self.current_shake_y, GRID_SIZE-6, GRID_SIZE-6), 2)
 
@@ -1778,6 +2076,8 @@ class Game:
                         b.draw(self.screen, shake=(self.current_shake_x, self.current_shake_y))
                     for z in self.zombies:
                         z.draw(self.screen, shake=(self.current_shake_x, self.current_shake_y))
+                    # Vapendelar blinkar på kartan
+                    self.draw_parts_on_map()
 
                     self.draw_boss_bar()
                     self.draw_wave_progress()
@@ -1792,6 +2092,8 @@ class Game:
                         self.draw_level_complete()
                     # draw scheduled countdown if active
                     self.draw_countdown()
+                    # Smidesbord-popup (ovanpå allt annat)
+                    self.draw_assembly_ui()
                 if self.show_menu:
                     self.draw_menu()
 
