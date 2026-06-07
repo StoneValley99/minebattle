@@ -1352,12 +1352,12 @@ class Game:
 
     def place_tower(self, col, row):
         tdata = TOWER_TYPES[self.selected_tower_type]
-        if not self.tower_unlocked(self.selected_tower_type):
+        # Kolla gratis-kö INNAN unlock-kontroll – smidda torn är alltid tillåtna
+        free_placement = (self.selected_tower_type in self.free_tower_queue)
+        if not free_placement and not self.tower_unlocked(self.selected_tower_type):
             return
         if self.grid_occupied(col, row):
             return
-        # Gratis placering om vi har ett gratistorn av rätt typ i kön
-        free_placement = (self.selected_tower_type in self.free_tower_queue)
         cost = 0 if free_placement else tdata["cost"]
         if self.money < cost:
             return
@@ -1501,6 +1501,9 @@ class Game:
             self.damage_boost_waves += 1
         elif effect == "free_tower":
             self.free_tower_queue.append(recipe["tower"])
+            # Välj torntypen automatiskt och stäng panelen – klicka bara på kartan!
+            self.selected_tower_type = recipe["tower"]
+            self.show_assembly = False
 
     def _handle_assembly_click(self, mx, my):
         popup_x = 18
