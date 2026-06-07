@@ -1010,7 +1010,8 @@ class Game:
             self.splash_image = pygame.image.load(os.path.join(MEDIA_DIR, "Gemini_Generated_Image_y20g1jy20g1jy20g.png")).convert()
         except Exception:
             self.splash_image = None
-        self.rng        = random.Random(42)
+        self.map_seed   = random.randint(0, 999_999)
+        self.rng        = random.Random(self.map_seed)
         self.level      = 1
         self._init_level()
         self.total_waves_done = 0   # för upplåsning av torn
@@ -1039,8 +1040,10 @@ class Game:
     def _init_level(self):
         self.waypoints  = generate_procedural_waypoints(self.level, self.rng)
         self.path_cells = build_path_cells(self.waypoints)
+        # Bakgrundstexturen randomizas med samma seed som banan
+        bg_seed = self.map_seed * 7 + self.level * 99
         self.bg_surface = make_mine_background(
-            random.Random(self.level * 99), self.path_cells, self.level, self.waypoints)
+            random.Random(bg_seed), self.path_cells, self.level, self.waypoints)
 
     def load_background_music(self):
         self.placement_music_sound = None
@@ -1228,6 +1231,9 @@ class Game:
         self.money = 300
         self.lives = 20
         self.score = 0
+        # Ny slumpad seed → ny bana varje omstart
+        self.map_seed = random.randint(0, 999_999)
+        self.rng      = random.Random(self.map_seed)
         self._init_level()
         self._reset_wave_state()
 
