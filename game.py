@@ -1224,6 +1224,10 @@ class Game:
         self.free_tower_queue  = []
         self.damage_boost_waves = 0
         self.show_assembly     = False
+        # Forge drag-and-drop
+        self.forge_grid        = [None, None, None, None]
+        self.forge_dragging    = None   # {'ptype', 'src': ('inv',idx) | ('grid',idx)}
+        self.forge_mouse       = (0, 0)
 
     def full_reset(self):
         self.level            = 1
@@ -1485,24 +1489,62 @@ class Game:
                     self._start_wave_immediate()
 
     # ── Vapendelar – hjälpmetoder ──────────────────────────────────────────────
+    # ── Forge – geometrihjälpare ──────────────────────────────────────────────
     def _assembly_btn_rect(self):
         ui_y = ROWS * GRID_SIZE
         return pygame.Rect(SCREEN_W // 2 - 200, ui_y + 14, 88, 32)
 
-    def _can_craft(self, recipe):
-        inv = list(self.collected_parts)
-        for part in recipe["parts"]:
-            if part in inv:
-                inv.remove(part)
-            else:
-                return False
-        return True
+    def _forge_panel_rect(self):
+        pw, ph = 660, 450
+        return pygame.Rect(SCREEN_W // 2 - pw // 2, SCREEN_H // 2 - ph // 2, pw, ph)
 
-    def _craft_recipe(self, recipe):
-        inv = list(self.collected_parts)
-        for part in recipe["parts"]:
-            inv.remove(part)
-        self.collected_parts = inv
+    def _forge_grid_rects(self):
+        p = self._forge_panel_rect()
+        ss, gap = 68, 8
+        gx, gy = p.x + 40, p.y + 155
+        return [pygame.Rect(gx + (i % 2) * (ss + gap), gy + (i // 2) * (ss + gap), ss, ss)
+                for i in range(4)]
+
+    def _forge_result_rect(self):
+        p  = self._forge_panel_rect()
+        ss, gap = 68, 8
+        rx = p.x + 40 + 2 * (ss + gap) + 64
+        ry = p.y + 155 + (ss + gap) // 2 - 40
+        return pygame.Rect(rx, ry, 80, 80)
+
+    def _forge_inv_rects(self):
+        p = self._forge_panel_rect()
+        ss, gap, n = 46, 6, 9
+        sx = p.x + p.w // 2 - (n * ss + (n - 1) * gap) // 2
+        return [pygame.Rect(sx + i * (ss + gap), p.y + 62, ss, ss) for i in range(n)]
+
+    def _forge_craft_btn_rect(self):
+        r = self._forge_result_rect()
+        return pygame.Rect(r.x - 4, r.bottom + 10, r.w + 8, 30)
+
+    def _forge_close_rect(self):
+        p = self._forge_panel_rect()
+        return pygame.Rect(p.right - 38, p.top + 8, 30, 30)
+
+    # ── Forge – logik ─────────────────────────────────────────────────────────
+    def _match_forge_recipe(self):
+        """Matcha nuvarande grid mot ett recept, oavsett position."""
+        parts = [p for p in self.forge_grid if p is not None]
+        if not parts:
+            return None
+        count = {}
+        for p in parts:
+            count[p] = count.get(p, 0) + 1
+        for recipe in PART_RECIPES:
+            rc = {}
+            for p in recipe["parts"]:
+                rc[p] = rc.get(p, 0) + 1
+            if rc == count:
+                return recipe
+        return None
+
+    def _forge_apply_recipe(self, recipe):
+        """Tillämpa ett recepts effekt (grid är redan tömt)."""
         effect = recipe["effect"]
         if effect == "money":
             self.money += recipe["amount"]
@@ -1511,108 +1553,238 @@ class Game:
             self.damage_boost_waves += 1
         elif effect == "free_tower":
             self.free_tower_queue.append(recipe["tower"])
-            # Välj torntypen automatiskt och stäng panelen – klicka bara på kartan!
             self.selected_tower_type = recipe["tower"]
             self.show_assembly = False
 
-    def _handle_assembly_click(self, mx, my):
-        popup_x = 18
-        popup_y = max(10, ROWS * GRID_SIZE - 330)
-        popup_w = 380
-        close_rect = pygame.Rect(popup_x + popup_w - 32, popup_y + 6, 26, 26)
-        if close_rect.collidepoint(mx, my):
+    def _forge_return_grid_to_inv(self):
+        """Returnera alla delar i gridet till lagret (vid stängning)."""
+        for i in range(4):
+            if self.forge_grid[i] is not None:
+                self.collected_parts.append(self.forge_grid[i])
+                self.forge_grid[i] = None
+
+    # ── Forge – händelsehantering ──────────────────────────────────────────────
+    def handle_forge_mousedown(self, mx, my):
+        if not self.show_assembly:
+            return False
+        panel = self._forge_panel_rect()
+
+        # Stäng-knapp
+        if self._forge_close_rect().collidepoint(mx, my):
+            self._forge_return_grid_to_inv()
             self.show_assembly = False
             return True
-        recipe_y = popup_y + 94
-        for recipe in PART_RECIPES:
-            btn = pygame.Rect(popup_x + 8, recipe_y, popup_w - 16, 52)
-            if btn.collidepoint(mx, my) and self._can_craft(recipe):
-                self._craft_recipe(recipe)
+
+        # Smid-knapp (klick på craft-knapp ELLER result-slot)
+        recipe = self._match_forge_recipe()
+        if recipe:
+            if self._forge_craft_btn_rect().collidepoint(mx, my) or \
+               self._forge_result_rect().collidepoint(mx, my):
+                self.forge_grid = [None, None, None, None]
+                self._forge_apply_recipe(recipe)
                 return True
-            recipe_y += 58
-        return False
+
+        # Plocka upp från lager
+        for i, rect in enumerate(self._forge_inv_rects()):
+            if rect.collidepoint(mx, my) and i < len(self.collected_parts):
+                ptype = self.collected_parts.pop(i)
+                self.forge_dragging = {'ptype': ptype, 'src': ('inv', i)}
+                self.forge_mouse    = (mx, my)
+                return True
+
+        # Plocka upp från grid
+        for i, rect in enumerate(self._forge_grid_rects()):
+            if rect.collidepoint(mx, my) and self.forge_grid[i] is not None:
+                ptype = self.forge_grid[i]
+                self.forge_grid[i] = None
+                self.forge_dragging = {'ptype': ptype, 'src': ('grid', i)}
+                self.forge_mouse    = (mx, my)
+                return True
+
+        # Klick utanför panelen → stäng
+        if not panel.collidepoint(mx, my):
+            self._forge_return_grid_to_inv()
+            self.show_assembly = False
+            return False
+
+        return True  # Klick inne i panelen men inte på något – konsumera eventet
+
+    def handle_forge_mouseup(self, mx, my):
+        if not self.forge_dragging:
+            return False
+        drag = self.forge_dragging
+        self.forge_dragging = None
+
+        # Släpp på grid-slot
+        for i, rect in enumerate(self._forge_grid_rects()):
+            if rect.collidepoint(mx, my):
+                if self.forge_grid[i] is None:
+                    self.forge_grid[i] = drag['ptype']
+                else:
+                    # Byt – befintlig del åker tillbaka till lager
+                    self.collected_parts.append(self.forge_grid[i])
+                    self.forge_grid[i] = drag['ptype']
+                return True
+
+        # Inte på grid → tillbaka till lager
+        self.collected_parts.append(drag['ptype'])
+        return True
+
+    # ── Forge – ritning ────────────────────────────────────────────────────────
+    def _draw_part_icon(self, surface, ptype, cx, cy, radius):
+        color = PART_TYPES[ptype]["color"]
+        pygame.draw.circle(surface, color, (cx, cy), radius)
+        pygame.draw.circle(surface, WHITE,  (cx, cy), radius, max(1, radius // 6))
+        lbl = PART_FONT.render(PART_TYPES[ptype]["name"][0], True, (20, 20, 20))
+        surface.blit(lbl, (cx - lbl.get_width() // 2, cy - lbl.get_height() // 2))
 
     def draw_parts_on_map(self):
         for p in self.parts_on_map:
             p.draw(self.screen, shake=(self.current_shake_x, self.current_shake_y))
 
-    def draw_assembly_ui(self):
-        if not self.show_assembly:
+    def draw_forge_panel(self):
+        if not self.show_assembly and not self.forge_dragging:
             return
-        popup_x = 18
-        popup_y = max(10, ROWS * GRID_SIZE - 330)
-        popup_w = 380
-        popup_h = 100 + len(PART_RECIPES) * 58 + 12
 
-        # Background panel
-        surf = pygame.Surface((popup_w, popup_h), pygame.SRCALPHA)
-        surf.fill((16, 14, 12, 235))
-        pygame.draw.rect(surf, (175, 150, 90), (0, 0, popup_w, popup_h), 2, border_radius=12)
-        self.screen.blit(surf, (popup_x, popup_y))
+        if self.show_assembly:
+            # Mörk overlay bakom panelen
+            ov = pygame.Surface((SCREEN_W, SCREEN_H), pygame.SRCALPHA)
+            ov.fill((0, 0, 0, 160))
+            self.screen.blit(ov, (0, 0))
 
-        # Title
-        title = self.font_big.render("SMIDESBORD", True, WARN_YELLOW)
-        self.screen.blit(title, (popup_x + 12, popup_y + 10))
+            panel = self._forge_panel_rect()
 
-        # Close button
-        close_rect = pygame.Rect(popup_x + popup_w - 32, popup_y + 6, 26, 26)
-        pygame.draw.rect(self.screen, (180, 45, 45), close_rect, border_radius=6)
-        cx_t = self.font_med.render("X", True, WHITE)
-        self.screen.blit(cx_t, (close_rect.x + 6, close_rect.y + 3))
+            # Panelbakgrund
+            pygame.draw.rect(self.screen, (18, 14, 10),  panel, border_radius=16)
+            pygame.draw.rect(self.screen, (175, 148, 88), panel, 2, border_radius=16)
 
-        # Inventory row
-        inv_lbl = self.font_small.render("Dina delar:", True, (200, 200, 180))
-        self.screen.blit(inv_lbl, (popup_x + 12, popup_y + 46))
-        for i, ptype in enumerate(self.collected_parts[:8]):
-            color = PART_TYPES[ptype]["color"]
-            cx2 = popup_x + 110 + i * 28
-            cy2 = popup_y + 54
-            pygame.draw.circle(self.screen, color, (cx2, cy2), 11)
-            pygame.draw.circle(self.screen, WHITE, (cx2, cy2), 11, 1)
-            lbl = PART_FONT.render(PART_TYPES[ptype]["name"][0], True, (20, 20, 20))
-            self.screen.blit(lbl, (cx2 - lbl.get_width() // 2, cy2 - lbl.get_height() // 2))
-        if not self.collected_parts:
-            no_lbl = self.font_small.render("(inga delar samlade ännu)", True, GRAY)
-            self.screen.blit(no_lbl, (popup_x + 110, popup_y + 46))
+            # ─── Titel ───
+            title = self.font_big.render("SMIDESBORD", True, WARN_YELLOW)
+            self.screen.blit(title, (panel.x + 16, panel.y + 12))
+            pygame.draw.line(self.screen, (100, 85, 58),
+                             (panel.x + 8, panel.y + 46), (panel.right - 8, panel.y + 46), 1)
 
-        # Separator
-        pygame.draw.line(self.screen, (100, 88, 65),
-                         (popup_x + 8, popup_y + 72), (popup_x + popup_w - 8, popup_y + 72), 1)
-        recipe_lbl = self.font_small.render("Recept:", True, (200, 200, 180))
-        self.screen.blit(recipe_lbl, (popup_x + 12, popup_y + 76))
+            # Stäng-knapp
+            cr = self._forge_close_rect()
+            pygame.draw.rect(self.screen, (160, 38, 38), cr, border_radius=6)
+            xt = self.font_med.render("X", True, WHITE)
+            self.screen.blit(xt, (cr.x + cr.w // 2 - xt.get_width() // 2,
+                                   cr.y + cr.h // 2 - xt.get_height() // 2))
 
-        # Recipe buttons
-        recipe_y = popup_y + 94
-        for recipe in PART_RECIPES:
-            can_craft = self._can_craft(recipe)
-            btn_rect = pygame.Rect(popup_x + 8, recipe_y, popup_w - 16, 52)
-            bg_col = (30, 55, 30) if can_craft else (26, 22, 20)
-            border_col = (80, 200, 80) if can_craft else (75, 65, 55)
-            pygame.draw.rect(self.screen, bg_col, btn_rect, border_radius=8)
-            pygame.draw.rect(self.screen, border_col, btn_rect, 1, border_radius=8)
+            # ─── Lager (inventory) ───
+            inv_lbl = self.font_small.render("Dina delar  (dra till gridet):", True, (195, 190, 165))
+            self.screen.blit(inv_lbl, (panel.x + 16, panel.y + 50))
 
-            # Part icons for recipe
-            px2 = btn_rect.x + 10
-            for j, ptype in enumerate(recipe["parts"]):
-                color = PART_TYPES[ptype]["color"]
-                ccx = px2 + 11 + j * 26
-                ccy = btn_rect.y + btn_rect.h // 2
-                pygame.draw.circle(self.screen, color, (ccx, ccy), 10)
-                pygame.draw.circle(self.screen, WHITE, (ccx, ccy), 10, 1)
-                part_lbl = PART_FONT.render(PART_TYPES[ptype]["name"][0], True, (20, 20, 20))
-                self.screen.blit(part_lbl, (ccx - part_lbl.get_width() // 2, ccy - part_lbl.get_height() // 2))
+            dragging_inv_idx = (self.forge_dragging['src'][1]
+                                if self.forge_dragging and self.forge_dragging['src'][0] == 'inv'
+                                else -1)
+            for i, rect in enumerate(self._forge_inv_rects()):
+                has_part = i < len(self.collected_parts)
+                bg = (42, 36, 28) if has_part else (28, 24, 20)
+                pygame.draw.rect(self.screen, bg, rect, border_radius=7)
+                border = (110, 96, 70) if has_part else (55, 48, 38)
+                pygame.draw.rect(self.screen, border, rect, 1, border_radius=7)
+                if has_part and i != dragging_inv_idx:
+                    self._draw_part_icon(self.screen, self.collected_parts[i],
+                                          rect.centerx, rect.centery, 16)
+                elif has_part and i == dragging_inv_idx:
+                    # Ghost av den som dras
+                    ghost = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
+                    ghost.fill((60, 50, 38, 80))
+                    self.screen.blit(ghost, rect.topleft)
 
-            # Arrow and text
-            ax = px2 + len(recipe["parts"]) * 26 + 16
-            arr = self.font_small.render("->", True, (180, 180, 180))
-            self.screen.blit(arr, (ax, btn_rect.y + 8))
-            name_col = WHITE if can_craft else GRAY
-            name_txt = self.font_med.render(recipe["name"], True, name_col)
-            self.screen.blit(name_txt, (ax + 22, btn_rect.y + 6))
-            desc_col = (190, 190, 160) if can_craft else DARK_GRAY
-            desc_txt = self.font_small.render(recipe["desc"], True, desc_col)
-            self.screen.blit(desc_txt, (ax + 22, btn_rect.y + 28))
-            recipe_y += 58
+            if not self.collected_parts:
+                no_p = self.font_small.render("(inga delar samlade – hitta dem på kartan!)", True, GRAY)
+                self.screen.blit(no_p, (panel.x + panel.w // 2 - no_p.get_width() // 2,
+                                         panel.y + 76))
+
+            # ─── Smidegrid (2×2) ───
+            craft_lbl = self.font_small.render("Smid:", True, (195, 190, 165))
+            grid_rects = self._forge_grid_rects()
+            self.screen.blit(craft_lbl, (grid_rects[0].x, grid_rects[0].y - 18))
+
+            for i, rect in enumerate(grid_rects):
+                occupied = self.forge_grid[i] is not None
+                bg = (48, 42, 32) if occupied else (30, 26, 20)
+                pygame.draw.rect(self.screen, bg, rect, border_radius=10)
+                border = (180, 158, 100) if occupied else (88, 76, 58)
+                pygame.draw.rect(self.screen, border, rect, 2, border_radius=10)
+                if occupied:
+                    self._draw_part_icon(self.screen, self.forge_grid[i],
+                                          rect.centerx, rect.centery, 22)
+                else:
+                    hint = self.font_small.render("+", True, (60, 55, 45))
+                    self.screen.blit(hint, (rect.centerx - hint.get_width() // 2,
+                                            rect.centery - hint.get_height() // 2))
+
+            # ─── Pil ───
+            arr_cx = grid_rects[1].right + 32
+            arr_cy = grid_rects[0].centery + (grid_rects[2].centery - grid_rects[0].centery) // 2
+            arr = self.font_big.render("->", True, (210, 190, 130))
+            self.screen.blit(arr, (arr_cx - arr.get_width() // 2,
+                                    arr_cy - arr.get_height() // 2))
+
+            # ─── Resultat ───
+            result_rect  = self._forge_result_rect()
+            craft_btn    = self._forge_craft_btn_rect()
+            recipe       = self._match_forge_recipe()
+            res_lbl = self.font_small.render("Resultat:", True, (195, 190, 165))
+            self.screen.blit(res_lbl, (result_rect.x, result_rect.y - 18))
+
+            if recipe:
+                pygame.draw.rect(self.screen, (35, 55, 30), result_rect, border_radius=12)
+                pygame.draw.rect(self.screen, (80, 210, 80), result_rect, 2, border_radius=12)
+                if recipe["effect"] == "free_tower":
+                    icon_col = TOWER_TYPES[recipe["tower"]]["color"]
+                elif recipe["effect"] == "money":
+                    icon_col = YELLOW
+                elif recipe["effect"] == "damage_boost":
+                    icon_col = (255, 90, 30)
+                else:
+                    icon_col = WARN_YELLOW
+                pygame.draw.circle(self.screen, icon_col, result_rect.center,
+                                   result_rect.w // 2 - 8)
+                pygame.draw.circle(self.screen, WHITE, result_rect.center,
+                                   result_rect.w // 2 - 8, 2)
+                rname = self.font_small.render(recipe["name"], True, WHITE)
+                self.screen.blit(rname, (result_rect.centerx - rname.get_width() // 2,
+                                          result_rect.bottom + 2))
+                # Smid-knapp
+                pygame.draw.rect(self.screen, (45, 155, 45), craft_btn, border_radius=8)
+                pygame.draw.rect(self.screen, (110, 220, 110), craft_btn, 1, border_radius=8)
+                ct = self.font_med.render("SMID!", True, WHITE)
+                self.screen.blit(ct, (craft_btn.centerx - ct.get_width() // 2,
+                                       craft_btn.centery - ct.get_height() // 2))
+            else:
+                pygame.draw.rect(self.screen, (28, 24, 18), result_rect, border_radius=12)
+                pygame.draw.rect(self.screen, (65, 58, 44), result_rect, 1, border_radius=12)
+                q = self.font_big.render("?", True, (75, 68, 52))
+                self.screen.blit(q, (result_rect.centerx - q.get_width() // 2,
+                                      result_rect.centery - q.get_height() // 2))
+
+            # ─── Receptlista (höger sida) ───
+            rx = result_rect.right + 24
+            ry = panel.y + 50
+            rlbl = self.font_small.render("Recept:", True, (195, 190, 165))
+            self.screen.blit(rlbl, (rx, ry))
+            ry += 20
+            for rec in PART_RECIPES:
+                xi = rx
+                for ptype in rec["parts"]:
+                    self._draw_part_icon(self.screen, ptype, xi + 10, ry + 10, 9)
+                    xi += 24
+                arrow_t = self.font_small.render("->", True, (140, 132, 110))
+                self.screen.blit(arrow_t, (xi + 2, ry + 2))
+                nm = self.font_small.render(rec["name"], True, (185, 178, 150))
+                self.screen.blit(nm, (xi + 22, ry + 2))
+                desc_t = self.font_small.render(rec["desc"], True, (130, 124, 105))
+                self.screen.blit(desc_t, (xi + 22, ry + 16))
+                ry += 38
+
+        # ─── Dragen del följer musen ───
+        if self.forge_dragging:
+            self._draw_part_icon(self.screen, self.forge_dragging['ptype'],
+                                  self.forge_mouse[0], self.forge_mouse[1], 20)
 
     # ── Ritning ───────────────────────────────────────────────────────────────
     def draw_map(self):
@@ -1981,10 +2153,17 @@ class Game:
                             if self.tower_unlocked(tower_list[i]):
                                 self.selected_tower_type = tower_list[i]
 
+                elif event.type == pygame.MOUSEMOTION:
+                    if self.forge_dragging:
+                        self.forge_mouse = event.pos
+
+                elif event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                    self.handle_forge_mouseup(mx, my)
+
                 elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if self.show_intro:
                         continue
-                    # If menu is open, handle menu button clicks
+                    # Pausmeny
                     if self.show_menu:
                         box, resume, quit_b = self.menu_button_rects()
                         if resume.collidepoint(mx, my):
@@ -1998,6 +2177,12 @@ class Game:
                     if self.level_transition:
                         self.level_transition = False
                         continue
+
+                    # Forge-panel hanterar sina egna klick
+                    if self.show_assembly:
+                        if self.handle_forge_mousedown(mx, my):
+                            continue
+
                     handled = False
                     for i in range(len(TOWER_TYPES)):
                         cx, cy, radius = self.get_tower_btn_center(i)
@@ -2005,23 +2190,18 @@ class Game:
                             ttype = tower_list[i]
                             if self.tower_unlocked(ttype):
                                 self.selected_tower_type = ttype
-                                # trigger press animation
                                 self.ui_state['towers'][ttype]['press'] = 1.0
                                 if self.weapon_click_sound:
                                     self.weapon_click_sound.play()
                             handled = True
                             break
-                    # Kolla klick på assembly-popup
-                    if not handled and self.show_assembly:
-                        if self._handle_assembly_click(mx, my):
-                            handled = True
-                    # Kolla klick på smidesbord-knapp
+                    # Smidesbord-knapp
                     if not handled and self.between_waves and not self.level_complete:
                         abtn = self._assembly_btn_rect()
                         if abtn.collidepoint(mx, my):
                             self.show_assembly = not self.show_assembly
                             handled = True
-                    # Kolla klick på vapendel på kartan
+                    # Plocka upp vapendel från kartan
                     if not handled and my < ROWS * GRID_SIZE and not self.game_over:
                         for p in list(self.parts_on_map):
                             if p.hit(mx, my):
@@ -2036,7 +2216,6 @@ class Game:
                         cy_btn = ui_y + 48
                         radius = 52
                         if ((mx - cx_btn) ** 2 + (my - cy_btn) ** 2 <= radius ** 2) and self.between_waves and self.wave_complete_timer == 0 and not self.level_complete:
-                            # press animation
                             self.ui_state['wave_press'] = 1.0
                             self.start_wave()
                         elif my < ROWS * GRID_SIZE and not self.level_complete:
@@ -2106,7 +2285,7 @@ class Game:
                     # draw scheduled countdown if active
                     self.draw_countdown()
                     # Smidesbord-popup (ovanpå allt annat)
-                    self.draw_assembly_ui()
+                    self.draw_forge_panel()
                 if self.show_menu:
                     self.draw_menu()
 
