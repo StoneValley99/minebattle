@@ -37,8 +37,9 @@ def make_placement_sound():
 
 SCREEN_W, SCREEN_H = 1024, 768
 GRID_SIZE = 48
-COLS = SCREEN_W // GRID_SIZE   # 21
-ROWS = (SCREEN_H - 144) // GRID_SIZE  # 13
+UI_PANEL_H = 190   # minsta höjd på nedre panelen så knapparna ryms
+COLS = SCREEN_W // GRID_SIZE
+ROWS = (SCREEN_H - UI_PANEL_H) // GRID_SIZE
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 MEDIA_DIR = os.path.join(ROOT_DIR, "media")
 MUSIC_FILE = os.path.join(MEDIA_DIR, "idoberg-relaxing-guitar-loop-v5-245859.mp3")
@@ -988,15 +989,16 @@ class Game:
     def __init__(self):
         # Start in fullscreen mode and adapt layout to actual display size
         global SCREEN_W, SCREEN_H, COLS, ROWS
-        self.fullscreen = True
-        flags = pygame.FULLSCREEN | pygame.DOUBLEBUF
-        # Use (0,0) so Pygame picks the current display resolution for fullscreen
-        self.screen = pygame.display.set_mode((0, 0), flags)
-        global SCREEN_W, SCREEN_H, COLS, ROWS
-        w, h = self.screen.get_size()
+        # Starta i fönster med fast logisk storlek (F11/F växlar helskärm).
+        # SCALED gör att spelet ser likadant ut i fönster och helskärm.
+        self.fullscreen = False
+        info = pygame.display.Info()
+        w = min(1600, max(1300, info.current_w - 80))
+        h = min(900,  max(700,  info.current_h - 140))
         SCREEN_W, SCREEN_H = w, h
         COLS = SCREEN_W // GRID_SIZE
-        ROWS = (SCREEN_H - 144) // GRID_SIZE
+        ROWS = (SCREEN_H - UI_PANEL_H) // GRID_SIZE
+        self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), pygame.SCALED)
         pygame.display.set_caption("MineBattle – LKAB Gruvförsvar")
         self.clock      = pygame.time.Clock()
         self.show_menu  = False
@@ -1189,7 +1191,7 @@ class Game:
 
     def toggle_fullscreen(self):
         self.fullscreen = not self.fullscreen
-        flags = pygame.FULLSCREEN if self.fullscreen else 0
+        flags = pygame.SCALED | (pygame.FULLSCREEN if self.fullscreen else 0)
         self.screen = pygame.display.set_mode((SCREEN_W, SCREEN_H), flags)
 
     def _reset_wave_state(self):
@@ -1444,27 +1446,15 @@ class Game:
         # UI animations (hover/press smoothing)
         mx, my = pygame.mouse.get_pos()
         # Towers
-        button_count = len(TOWER_TYPES)
-        tower_spacing = 132
-        tower_cy = ROWS * GRID_SIZE + 106
-        total_width = button_count * tower_spacing
-        start_x = SCREEN_W - 80 - total_width + tower_spacing // 2
         for i, ttype in enumerate(TOWER_TYPES.keys()):
-            cx = start_x + i * tower_spacing
-            cy = tower_cy
-            radius = 46
+            cx, cy, radius = self.get_tower_btn_center(i)
             hovered = (mx - cx) ** 2 + (my - cy) ** 2 <= (radius + 8) ** 2
             s = self.ui_state['towers'][ttype]
             target = 1.0 if hovered else 0.0
             s['hover'] += (target - s['hover']) * min(1.0, dt * 10.0)
             s['press'] = max(0.0, s['press'] - dt * 6.0)
         # Wave button hover/press
-        ui_y = ROWS * GRID_SIZE
-        panel_h = SCREEN_H - ui_y
-        cx_btn = SCREEN_W // 2
-        cy_btn = ui_y + 48
-        radius = 52
-        wh = ((mx - cx_btn) ** 2 + (my - cy_btn) ** 2 <= radius ** 2)
+        wh = self.wave_btn_hit(mx, my)
         self.ui_state['wave_hover'] += ((1.0 if wh else 0.0) - self.ui_state['wave_hover']) * min(1.0, dt * 8.0)
         self.ui_state['wave_press'] = max(0.0, self.ui_state['wave_press'] - dt * 6.0)
         # handle countdown scheduling
@@ -1491,8 +1481,8 @@ class Game:
     # ── Vapendelar – hjälpmetoder ──────────────────────────────────────────────
     # ── Forge – geometrihjälpare ──────────────────────────────────────────────
     def _assembly_btn_rect(self):
-        ui_y = ROWS * GRID_SIZE
-        return pygame.Rect(SCREEN_W // 2 - 200, ui_y + 14, 88, 32)
+        m = self.ui_metrics()
+        return pygame.Rect(m["wave_cx"] - 50, m["wave_cy"] + m["wave_r"] + 10, 100, 30)
 
     def _forge_panel_rect(self):
         pw, ph = 660, 450
@@ -1856,9 +1846,8 @@ class Game:
         self.screen.blit(panel_surf, (0, ui_y))
 
         # centered wave/start button
-        wave_cx = SCREEN_W // 2
-        wave_cy = ui_y + 62
-        btn_r = 66
+        um = self.ui_metrics()
+        wave_cx, wave_cy, btn_r = um["wave_cx"], um["wave_cy"], um["wave_r"]
         wh = self.ui_state['wave_hover']
         wp = self.ui_state['wave_press']
         scale = 1.0 + wh * 0.18 - wp * 0.08
@@ -1923,13 +1912,10 @@ class Game:
             (f"{self.wave}/{len(LEVEL_WAVES[self.level])}", WHITE, "VÅG"),
             (f"{self.score}", LIGHT_YELLOW, "POÄNG"),
         ]
-        stat_radius = 54
-        stat_spacing = stat_radius * 2 + 18
-        stat_x = 80 + stat_radius
-        stat_y = ui_y + 106
+        stat_radius = um["stat_r"]
         for idx, (value, col, label) in enumerate(stats):
-            cx = stat_x + idx * stat_spacing
-            cy = stat_y
+            cx = um["stat_x0"] + idx * um["stat_sp"]
+            cy = um["stat_cy"]
             stat_surf = pygame.Surface((stat_radius*2+12, stat_radius*2+12), pygame.SRCALPHA)
             pygame.draw.circle(stat_surf, (28, 28, 30, 220), (stat_radius+6, stat_radius+6), stat_radius)
             pygame.draw.circle(stat_surf, (*col, 200), (stat_radius+6, stat_radius+6), stat_radius-8)
@@ -1946,30 +1932,26 @@ class Game:
 
         # right weapon selection section
         mx, my = pygame.mouse.get_pos()
-        button_count = len(TOWER_TYPES)
-        tower_cy = ui_y + 106
-        tower_spacing = 132
-        total_width = button_count * tower_spacing
-        start_x = SCREEN_W - 80 - total_width + tower_spacing // 2
         for i, (ttype, data) in enumerate(TOWER_TYPES.items()):
-            cx = start_x + i * tower_spacing
-            cy = tower_cy
+            cx, cy, base_rad = self.get_tower_btn_center(i)
             unlocked = self.tower_unlocked(ttype)
             affordable = self.money >= data["cost"] and unlocked
             selected = self.selected_tower_type == ttype
             s = self.ui_state['towers'][ttype]
             hover_val = s['hover']
             press_val = s['press']
-            base_rad = 46
-            radius = int(base_rad + hover_val * 14 + (10 if selected else 0) - press_val * 8)
+            radius = int(base_rad + hover_val * 8 - press_val * 6)
             color = data["color"] if affordable else (90, 90, 90)
             ring = pygame.Surface((radius*2+16, radius*2+16), pygame.SRCALPHA)
             pygame.draw.circle(ring, (*color, 220), (radius+8, radius+8), radius)
             pygame.draw.circle(ring, (255,255,255,100), (radius+8, radius+8), radius, 5)
             pygame.draw.circle(ring, (255,255,255,20), (radius+8, radius+8), radius+8, 4)
             self.screen.blit(ring, (cx - radius - 8, cy - radius - 8))
+            if selected:
+                # Vald torntyp markeras med en gul ring (etikett visas bara vid hover)
+                pygame.draw.circle(self.screen, WARN_YELLOW, (cx, cy), radius + 7, 4)
             icon_col = WHITE if affordable else GRAY
-            if hover_val > 0.12 or selected:
+            if hover_val > 0.12:
                 label_text = ttype.capitalize()
                 cost_text = f"{data['cost']} kr"
                 txt = self.ui_font.render(label_text, True, WHITE)
@@ -2063,15 +2045,29 @@ class Game:
         self.screen.blit(t, (SCREEN_W//2 - t.get_width()//2, ROWS*GRID_SIZE//2 - 30))
         self.screen.blit(s, (SCREEN_W//2 - s.get_width()//2, ROWS*GRID_SIZE//2 + 10))
 
+    def ui_metrics(self):
+        """Layout för nedre panelen – statistik till vänster, REDO i mitten, torn till höger."""
+        ui_y = ROWS * GRID_SIZE
+        m = {"ui_y": ui_y}
+        m["stat_r"], m["stat_sp"], m["stat_cy"] = 44, 100, ui_y + 100
+        m["stat_x0"] = 24 + m["stat_r"]
+        stats_end = 24 + 4 * m["stat_sp"]
+        m["tower_r"], m["tower_sp"], m["tower_cy"] = 40, 112, ui_y + 100
+        total = len(TOWER_TYPES) * m["tower_sp"]
+        m["tower_x0"] = SCREEN_W - 24 - total + m["tower_sp"] // 2
+        towers_start = SCREEN_W - 24 - total
+        m["wave_r"]  = 50
+        m["wave_cx"] = (stats_end + towers_start) // 2
+        m["wave_cy"] = ui_y + 78
+        return m
+
     def get_tower_btn_center(self, idx):
-        # Compute same sizing logic as draw_ui so hit detection matches visuals
-        tower_count = len(TOWER_TYPES)
-        tower_spacing = 132
-        total_width = tower_count * tower_spacing
-        start_x = SCREEN_W - 80 - total_width + tower_spacing // 2
-        cx = start_x + idx * tower_spacing
-        cy = ROWS * GRID_SIZE + 106
-        return cx, cy, 46
+        m = self.ui_metrics()
+        return m["tower_x0"] + idx * m["tower_sp"], m["tower_cy"], m["tower_r"]
+
+    def wave_btn_hit(self, mx, my):
+        m = self.ui_metrics()
+        return (mx - m["wave_cx"]) ** 2 + (my - m["wave_cy"]) ** 2 <= m["wave_r"] ** 2
 
     def menu_button_rects(self):
         # Centered small menu with Resume / Quit
@@ -2211,11 +2207,7 @@ class Game:
                                 handled = True
                                 break
                     if not handled:
-                        ui_y = ROWS * GRID_SIZE
-                        cx_btn = SCREEN_W // 2
-                        cy_btn = ui_y + 48
-                        radius = 52
-                        if ((mx - cx_btn) ** 2 + (my - cy_btn) ** 2 <= radius ** 2) and self.between_waves and self.wave_complete_timer == 0 and not self.level_complete:
+                        if self.wave_btn_hit(mx, my) and self.between_waves and self.wave_complete_timer == 0 and not self.level_complete:
                             self.ui_state['wave_press'] = 1.0
                             self.start_wave()
                         elif my < ROWS * GRID_SIZE and not self.level_complete:
